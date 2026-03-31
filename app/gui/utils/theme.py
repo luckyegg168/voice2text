@@ -152,6 +152,22 @@ QPushButton#primaryButton:pressed {{
     color: white;
 }}
 
+/* 下載按鈕（緊湊圖示）*/
+QPushButton#downloadButton {{
+    background-color: {c['bg_elevated']};
+    color: {c['text_secondary']};
+    border: 1px solid {c['border']};
+    border-radius: 6px;
+    padding: 0px;
+    min-width: 30px;
+    font-size: 13pt;
+}}
+QPushButton#downloadButton:hover {{
+    background-color: {c['primary_glow']};
+    border-color: {c['primary']};
+    color: {c['primary']};
+}}
+
 /* ── Input Fields ── */
 QLineEdit, QTextEdit, QPlainTextEdit {{
     background-color: {c['bg_surface']};

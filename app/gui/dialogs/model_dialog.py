@@ -53,12 +53,17 @@ class _DownloadWorker(QThread):
 class ModelDownloadDialog(QDialog):
     """模型下載 / 驗證對話框"""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, preset_model: str = ""):
         super().__init__(parent)
         self.setWindowTitle("下載 / 更新模型")
         self.resize(520, 400)
         self._worker: _DownloadWorker | None = None
+        self._preset_model = preset_model
         self._setup_ui()
+
+        # 若傳入預設模型，自動選取
+        if preset_model and preset_model in _ASR_MODELS:
+            self.model_combo.setCurrentText(preset_model)
 
     # ── UI 建構 ──────────────────────────────────────────────────────────
 

@@ -231,7 +231,7 @@ class MainWindow(QMainWindow):
         tools_menu = menubar.addMenu("工具(&T)")
 
         download_action = tools_menu.addAction("下載 / 更新模型…")
-        download_action.triggered.connect(self._on_download_model)
+        download_action.triggered.connect(lambda: self._on_download_model())
 
         help_menu = menubar.addMenu("說明(&H)")
 
@@ -246,6 +246,7 @@ class MainWindow(QMainWindow):
         self.control_panel.clear_clicked.connect(self._on_clear)
         self.control_panel.convert_clicked.connect(self._on_convert)
         self.control_panel.translate_clicked.connect(self._on_translate)
+        self.control_panel.download_model_clicked.connect(self._on_download_model)
 
     def _setup_shortcuts(self) -> None:
         QShortcut(QKeySequence("Ctrl+R"), self).activated.connect(self._on_record)
@@ -445,9 +446,9 @@ class MainWindow(QMainWindow):
     def _on_api_health_changed(self, is_ok: bool, url: str) -> None:
         self.status_bar.set_api_status(is_ok)
 
-    def _on_download_model(self) -> None:
+    def _on_download_model(self, model_id: str = "") -> None:
         """開啟模型下載對話框"""
-        dialog = ModelDownloadDialog(self)
+        dialog = ModelDownloadDialog(self, preset_model=model_id)
         dialog.exec()
 
     def closeEvent(self, event) -> None:

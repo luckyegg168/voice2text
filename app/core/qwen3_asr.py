@@ -178,6 +178,9 @@ def transcribe(
         if data.ndim > 1:
             data = data[:, 0]
         audio_input = (data, sr)
+    elif isinstance(audio_input, np.ndarray):
+        # 錄音 / convert_to_16kmono 回傳的 numpy array 均已是 16 kHz float32 mono
+        audio_input = (audio_input, 16000)
 
     results = model.transcribe(
         audio=audio_input,

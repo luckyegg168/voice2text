@@ -35,6 +35,7 @@ class ControlPanel(QWidget):
     clear_clicked = Signal()
     convert_clicked = Signal(str)
     translate_clicked = Signal(str)
+    download_model_clicked = Signal(str)   # 傳遞選中的 model_id
 
     def __init__(self, parent: QWidget = None):
         super().__init__(parent)
@@ -77,8 +78,17 @@ class ControlPanel(QWidget):
         self.model_combo.setToolTip("選擇 ASR 語音辨識模型\n0.6B 速度快；1.7B 精度高")
         self.model_combo.setFixedWidth(170)
 
+        self.download_btn = QPushButton("⬇")
+        self.download_btn.setObjectName("downloadButton")
+        self.download_btn.setToolTip("下載 / 更新選取的 ASR 模型")
+        self.download_btn.setFixedSize(30, 30)
+        self.download_btn.clicked.connect(
+            lambda: self.download_model_clicked.emit(self.get_model())
+        )
+
         row.addWidget(model_lbl)
         row.addWidget(self.model_combo)
+        row.addWidget(self.download_btn)
         row.addWidget(_v_sep())
 
         # ── 語言選擇 ──
@@ -115,6 +125,8 @@ class ControlPanel(QWidget):
         self.record_btn = QPushButton("⏺  開始錄音")
         self.record_btn.setObjectName("recordButton")
         self.record_btn.setToolTip("開始 / 停止錄音  (Ctrl+R)")
+        self.record_btn.setFixedWidth(165)
+        self.record_btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.record_btn.clicked.connect(self.record_clicked.emit)
         row.addWidget(self.record_btn)
 
