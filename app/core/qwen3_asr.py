@@ -4,19 +4,39 @@ import gc
 from typing import Optional
 
 import numpy as np
-import torch
-from qwen_asr import Qwen3ASRModel
 
 from app.core.config import get_settings
 
+# 延遲匯入 torch / qwen_asr，讓 GUI 在未安裝模型時仍能啟動
+try:
+    import torch
+    _TORCH_AVAILABLE = True
+except ImportError:
+    _TORCH_AVAILABLE = False
+    torch = None  # type: ignore[assignment]
+
+try:
+    from qwen_asr import Qwen3ASRModel
+    _QWEN_ASR_AVAILABLE = True
+except ImportError:
+    _QWEN_ASR_AVAILABLE = False
+    Qwen3ASRModel = None  # type: ignore[assignment,misc]
+
 _settings = get_settings()
 
-_model_cache: Optional[Qwen3ASRModel] = None
+_model_cache: Optional["Qwen3ASRModel"] = None  # type: ignore[type-arg]
 _current_model_id: Optional[str] = None
 
 
-def _get_dtype() -> torch.dtype:
+def is_available() -> bool:
+    """回傳 torch 和 qwen-asr 是否均已安裝"""
+    return _TORCH_AVAILABLE and _QWEN_ASR_AVAILABLE
+
+
+def _get_dtype():
     """取得 torch dtype"""
+    if not _TORCH_AVAILABLE:
+        return None
     dtype_map = {
         "float16": torch.float16,
         "bfloat16": torch.bfloat16,
@@ -27,12 +47,14 @@ def _get_dtype() -> torch.dtype:
 
 def _get_device() -> str:
     """取得設備"""
+    if not _TORCH_AVAILABLE:
+        return "cpu"
     if _settings.device == "cuda" and torch.cuda.is_available():
         return "cuda:0"
     return "cpu"
 
 
-def load_model(model_id: str = "Qwen/Qwen3-ASR-0.6B") -> Qwen3ASRModel:
+def load_model(model_id: str = "Qwen/Qwen3-ASR-0.6B"):
     """載入模型（帶快取）
 
     Args:
@@ -40,7 +62,19 @@ def load_model(model_id: str = "Qwen/Qwen3-ASR-0.6B") -> Qwen3ASRModel:
 
     Returns:
         Qwen3ASRModel 實例
+
+    Raises:
+        RuntimeError: 若 torch / qwen-asr 未安裝
     """
+    if not _TORCH_AVAILABLE:
+        raise RuntimeError(
+            "torch 未安裝。請執行：01setup.ps1 重新安裝依賴，或手動：pip install torch"
+        )
+    if not _QWEN_ASR_AVAILABLE:
+        raise RuntimeError(
+            "qwen-asr 未安裝。請執行：01setup.ps1 重新安裝依賴，或手動：pip install qwen-asr"
+        )
+
     global _model_cache, _current_model_id
 
     if _model_cache is not None and _current_model_id == model_id:
@@ -72,7 +106,7 @@ def unload_model() -> None:
         _model_cache = None
         _current_model_id = None
         gc.collect()
-        if torch.cuda.is_available():
+        if _TORCH_AVAILABLE and torch.cuda.is_available():
             torch.cuda.empty_cache()
 
 

@@ -72,6 +72,15 @@ class StatusBar(QWidget):
         self.memory_label.setStyleSheet(_CSS)
         layout.addWidget(self.memory_label)
 
+        sep2 = QLabel("│")
+        sep2.setStyleSheet("color: #2E3347;")
+        layout.addWidget(sep2)
+
+        self.api_dot = QLabel("● API")
+        self.api_dot.setStyleSheet("color: #8B90A0; font-size: 9pt;")
+        self.api_dot.setToolTip("翻譯 API 狀態未知")
+        layout.addWidget(self.api_dot)
+
     # ── 公開 API ──────────────────────────────────────────────────────────
 
     def set_status(self, status: str) -> None:
@@ -82,6 +91,14 @@ class StatusBar(QWidget):
 
     def set_memory(self, memory: str) -> None:
         self.memory_label.setText(f"記憶體：{memory}")
+
+    def set_api_status(self, ok: bool) -> None:
+        if ok:
+            self.api_dot.setStyleSheet("color: #00D4AA; font-size: 9pt;")
+            self.api_dot.setToolTip("翻譯 API 已連線")
+        else:
+            self.api_dot.setStyleSheet("color: #FF4757; font-size: 9pt;")
+            self.api_dot.setToolTip("翻譯 API 未連線")
 
     def set_recording(self, recording: bool) -> None:
         if recording:

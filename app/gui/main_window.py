@@ -1,17 +1,15 @@
 """主視窗"""
 
-import asyncio
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QThread, Signal, Qt
+from PySide6.QtCore import QThread, Signal, QTimer, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
     QHBoxLayout,
     QMainWindow,
-    QMenuBar,
     QMessageBox,
     QStatusBar,
     QVBoxLayout,
@@ -22,7 +20,7 @@ from app.core import audio_processor, history_manager, qwen3_asr
 from app.core.audio_processor import AudioProcessor
 from app.core.config import get_settings
 from app.core.opencc_engine import opencc_engine
-from app.gui.dialogs import HistoryDialog, HotwordsDialog, SettingsDialog, TranslationDialog
+from app.gui.dialogs import HistoryDialog, HotwordsDialog, ModelDownloadDialog, SettingsDialog, TranslationDialog
 from app.gui.utils.signal_bus import signal_bus
 from app.gui.utils.theme import get_stylesheet
 from app.gui.widgets import (
@@ -85,6 +83,64 @@ class RecordingWorker(QThread):
             self._processor.stop()
 
 
+class HistorySaveWorker(QThread):
+    """非同步歷史儲存執行緒（避免 asyncio.run 阻塞 GUI）"""
+
+    finished = Signal()
+    error = Signal(str)
+
+    def __init__(self, text: str, language: str, model: str,
+                 audio_path: str, duration: float):
+        super().__init__()
+        self.text = text
+        self.language = language
+        self.model = model
+        self.audio_path = audio_path
+        self.duration = duration
+
+    def run(self) -> None:
+        import asyncio
+        try:
+            mgr = history_manager.get_history_manager()
+            asyncio.run(mgr.add(
+                text=self.text,
+                language=self.language,
+                model=self.model,
+                audio_path=self.audio_path,
+                duration=self.duration,
+            ))
+            self.finished.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class ApiHealthWorker(QThread):
+    """背景 API 健康檢查執行緒"""
+
+    status_changed = Signal(bool, str)   # (is_ok, url)
+
+    def __init__(self, url: str):
+        super().__init__()
+        self.url = url
+
+    def run(self) -> None:
+        import httpx
+        try:
+            # 嘗試 /health 端點，失敗則試根路徑
+            base = self.url.rstrip("/").removesuffix("/v1/chat/completions")
+            for path in ("/health", "/api/tags", "/"):
+                try:
+                    r = httpx.get(f"{base}{path}", timeout=3.0)
+                    if r.status_code < 500:
+                        self.status_changed.emit(True, self.url)
+                        return
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        self.status_changed.emit(False, self.url)
+
+
 class MainWindow(QMainWindow):
     """主視窗"""
 
@@ -93,6 +149,8 @@ class MainWindow(QMainWindow):
         self.settings = get_settings()
         self.recording_worker = None
         self.transcription_worker = None
+        self.history_save_worker = None
+        self._api_health_worker = None
         self.current_audio_data = None
         self.is_recording = False
 
@@ -107,6 +165,16 @@ class MainWindow(QMainWindow):
         self._setup_shortcuts()
 
         signal_bus.model_loaded.connect(self._on_model_loaded)
+
+        # 啟動定時 API 健康檢查
+        self._api_check_timer = QTimer(self)
+        self._api_check_timer.timeout.connect(self._check_api_health)
+        self._api_check_timer.start(30_000)  # 每 30 秒
+        self._check_api_health()  # 立即執行一次
+
+        # 若依賴缺失，提示使用者
+        if not qwen3_asr.is_available():
+            self.status_bar.set_status("⚠ 請執行 01setup.ps1 安裝依賴")
 
     def _setup_ui(self) -> None:
         central_widget = QWidget()
@@ -159,6 +227,11 @@ class MainWindow(QMainWindow):
 
         hotwords_action = settings_menu.addAction("熱詞管理…")
         hotwords_action.triggered.connect(self._on_hotwords)
+
+        tools_menu = menubar.addMenu("工具(&T)")
+
+        download_action = tools_menu.addAction("下載 / 更新模型…")
+        download_action.triggered.connect(self._on_download_model)
 
         help_menu = menubar.addMenu("說明(&H)")
 
@@ -345,34 +418,37 @@ class MainWindow(QMainWindow):
         self.transcription_area.set_text(text)
 
     def _save_to_history(self, text: str, language: str) -> None:
-        """儲存到歷史紀錄"""
-        asyncio.run(self._async_save_to_history(text, language))
-
-    async def _async_save_to_history(self, text: str, language: str) -> None:
+        """儲存到歷史紀錄（背景執行緒，不阻塞 GUI）"""
         model = self.control_panel.get_model()
-
         recordings_dir = self.settings.recordings_dir
         recordings_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = Path(tempfile.mktemp(suffix=".wav", dir=recordings_dir))
-        AudioProcessor.save_wav(
-            str(timestamp),
-            self.current_audio_data,
-            self.settings.sample_rate,
-        )
-
-        history_mgr = history_manager.get_history_manager()
+        audio_path = tempfile.mktemp(suffix=".wav", dir=str(recordings_dir))
+        AudioProcessor.save_wav(audio_path, self.current_audio_data, self.settings.sample_rate)
         duration = len(self.current_audio_data) / self.settings.sample_rate
 
-        await history_mgr.add(
-            text=text,
-            language=language,
-            model=model,
-            audio_path=str(timestamp),
-            duration=duration,
+        self.history_save_worker = HistorySaveWorker(text, language, model, audio_path, duration)
+        self.history_save_worker.finished.connect(lambda: signal_bus.history_updated.emit())
+        self.history_save_worker.error.connect(
+            lambda e: self.status_bar.set_status(f"歷史儲存失敗: {e}")
         )
+        self.history_save_worker.start()
 
-        signal_bus.history_updated.emit()
+    def _check_api_health(self) -> None:
+        """背景檢查翻譯 API 連線狀態"""
+        url = self.settings.translation_api_url
+        if self._api_health_worker and self._api_health_worker.isRunning():
+            return
+        self._api_health_worker = ApiHealthWorker(url)
+        self._api_health_worker.status_changed.connect(self._on_api_health_changed)
+        self._api_health_worker.start()
+
+    def _on_api_health_changed(self, is_ok: bool, url: str) -> None:
+        self.status_bar.set_api_status(is_ok)
+
+    def _on_download_model(self) -> None:
+        """開啟模型下載對話框"""
+        dialog = ModelDownloadDialog(self)
+        dialog.exec()
 
     def closeEvent(self, event) -> None:
         self._stop_recording()

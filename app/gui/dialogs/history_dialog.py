@@ -3,7 +3,7 @@
 import asyncio
 from datetime import datetime
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -21,12 +21,48 @@ from PySide6.QtWidgets import (
 from app.core.history_manager import get_history_manager
 
 
+class _HistoryLoadWorker(QThread):
+    done = Signal(list)
+    error = Signal(str)
+
+    def __init__(self, search: str = ""):
+        super().__init__()
+        self.search = search
+
+    def run(self) -> None:
+        try:
+            mgr = get_history_manager()
+            items, _ = asyncio.run(
+                mgr.list(search=self.search if self.search else None, limit=100)
+            )
+            self.done.emit(items)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class _HistoryDeleteWorker(QThread):
+    done = Signal(str)   # search text to reload with
+    error = Signal(str)
+
+    def __init__(self, item_id: str, search: str = ""):
+        super().__init__()
+        self.item_id = item_id
+        self.search = search
+
+    def run(self) -> None:
+        try:
+            mgr = get_history_manager()
+            asyncio.run(mgr.delete(self.item_id))
+            self.done.emit(self.search)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class HistoryDialog(QDialog):
     """歷史紀錄對話框"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.history_manager = get_history_manager()
         self.current_items = []
         self.setWindowTitle("History")
         self.resize(600, 500)
@@ -72,9 +108,14 @@ class HistoryDialog(QDialog):
         layout.addLayout(buttons_layout)
 
     def _load_history(self, search: str = "") -> None:
-        items, _ = asyncio.run(
-            self.history_manager.list(search=search if search else None, limit=100)
+        self._load_worker = _HistoryLoadWorker(search)
+        self._load_worker.done.connect(self._on_history_loaded)
+        self._load_worker.error.connect(
+            lambda e: self.list_widget.addItem(f"載入失敗: {e}")
         )
+        self._load_worker.start()
+
+    def _on_history_loaded(self, items: list) -> None:
         self.current_items = items
         self._populate_list(items)
 
@@ -133,5 +174,10 @@ class HistoryDialog(QDialog):
         index = self.list_widget.currentRow()
         if 0 <= index < len(self.current_items):
             item = self.current_items[index]
-            asyncio.run(self.history_manager.delete(item["id"]))
-            self._load_history(search=self.search_input.text())
+            search = self.search_input.text()
+            self._delete_worker = _HistoryDeleteWorker(item["id"], search)
+            self._delete_worker.done.connect(self._load_history)
+            self._delete_worker.error.connect(
+                lambda e: self.list_widget.addItem(f"刪除失敗: {e}")
+            )
+            self._delete_worker.start()
