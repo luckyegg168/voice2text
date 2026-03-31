@@ -1,7 +1,7 @@
 """狀態列元件"""
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QStatusBar, QWidget
 
 
 class _DotIndicator(QLabel):
@@ -37,17 +37,19 @@ class _DotIndicator(QLabel):
 _CSS = "color: #8B90A0; font-size: 9pt;"
 
 
-class StatusBar(QWidget):
-    """底部狀態列（使用 setStatusBar 嵌入主視窗）"""
+class StatusBar(QStatusBar):
+    """底部狀態列 — 繼承 QStatusBar 以相容 QMainWindow.setStatusBar()"""
 
     def __init__(self, parent: QWidget = None):
         super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setMaximumHeight(28)
+        self.setSizeGripEnabled(False)
+        self.setFixedHeight(28)
         self._setup_ui()
 
     def _setup_ui(self) -> None:
-        layout = QHBoxLayout(self)
+        # 用 container widget 裝載自訂佈局，避免干擾 QStatusBar 內部 layout
+        container = QWidget()
+        layout = QHBoxLayout(container)
         layout.setContentsMargins(12, 0, 12, 0)
         layout.setSpacing(10)
 
@@ -80,6 +82,9 @@ class StatusBar(QWidget):
         self.api_dot.setStyleSheet("color: #8B90A0; font-size: 9pt;")
         self.api_dot.setToolTip("翻譯 API 狀態未知")
         layout.addWidget(self.api_dot)
+
+        # 以 stretch=1 填滿整列
+        self.addWidget(container, 1)
 
     # ── 公開 API ──────────────────────────────────────────────────────────
 
