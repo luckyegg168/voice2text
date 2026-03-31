@@ -1,0 +1,26 @@
+# Auto-detect text files and normalize line endings
+* text=auto
+
+# Shell scripts must use LF (Unix)
+*.sh  text eol=lf
+
+# PowerShell scripts use CRLF on Windows
+*.ps1 text eol=crlf
+
+# Python — LF everywhere
+*.py  text eol=lf
+
+# Config / docs — auto
+*.toml  text
+*.md    text
+*.json  text
+*.yaml  text
+*.yml   text
+*.env   text eol=lf
+
+# Binaries — never touch
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gz    binary
+*.zip   binary

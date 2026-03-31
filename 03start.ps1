@@ -1,50 +1,103 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Voice2Text — 03 啟動應用程式
+    Voice2Text - 03 Start Application
 .DESCRIPTION
-  選擇啟動 GUI 介面、REST API 伺服器或兩者同時執行
+    Launches the GUI desktop app, the REST API server, or both.
+    Requires 01setup.ps1 to have been run first.
+.EXAMPLE
+    .\03start.ps1
 #>
 
-$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$script:ExitCode = 0
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
 
-$pythonExe = ".venv\Scripts\python.exe"
-if (-Not (Test-Path $pythonExe)) {
-    Write-Host "✘ 找不到虛擬環境，請先執行 01setup.ps1" -ForegroundColor Red
-    exit 1
+function Invoke-PauseExit {
+    param([switch]$OnError)
+    if ($OnError) {
+        Write-Host ""
+        Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
+        $null = Read-Host
+    }
+    exit $script:ExitCode
 }
 
-Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host " Voice2Text  03 — 啟動應用程式" -ForegroundColor Cyan
-Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "啟動選項：" -ForegroundColor Yellow
-Write-Host "  1) GUI  — 圖形化介面（桌面應用）"
-Write-Host "  2) API  — REST API 伺服器"
-Write-Host "  3) 全部 — GUI + API 伺服器（各開一個視窗）"
-Write-Host ""
+try {
 
-$choice = Read-Host "請選擇 [1/2/3]（預設 1）"
-if ([string]::IsNullOrWhiteSpace($choice)) { $choice = "1" }
+    # ── Verify virtual environment ────────────────────────────────
+    $pythonExe = Join-Path $ScriptDir ".venv\Scripts\python.exe"
+    if (-Not (Test-Path $pythonExe)) {
+        throw "Virtual environment not found. Please run 01setup.ps1 first."
+    }
 
-switch ($choice) {
-    "1" {
-        Write-Host "`n啟動 GUI …" -ForegroundColor Green
-        & $pythonExe -m app.gui
+    # ── Load .env environment variables ──────────────────────────
+    $envPath = Join-Path $ScriptDir ".env"
+    if (Test-Path $envPath) {
+        Get-Content $envPath | ForEach-Object {
+            if ($_ -match '^\s*([^#][^=]*?)\s*=\s*(.*?)\s*$') {
+                $key = $Matches[1].Trim()
+                $val = $Matches[2].Trim()
+                if ($key) { [System.Environment]::SetEnvironmentVariable($key, $val, "Process") }
+            }
+        }
     }
-    "2" {
-        Write-Host "`n啟動 API 伺服器 …" -ForegroundColor Green
-        & $pythonExe -m app.api
+
+    Write-Host "===================================" -ForegroundColor Cyan
+    Write-Host " Voice2Text  03 - Start Application" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Launch options:" -ForegroundColor Yellow
+    Write-Host "  1) GUI  - Graphical desktop app (default)"
+    Write-Host "  2) API  - REST API server  (http://localhost:8000/docs)"
+    Write-Host "  3) Both - GUI + API server in separate windows"
+    Write-Host ""
+
+    $choice = (Read-Host "Select option [1/2/3] (default: 1)").Trim()
+    if ([string]::IsNullOrWhiteSpace($choice)) { $choice = "1" }
+
+    switch ($choice) {
+        "1" {
+            Write-Host ""
+            Write-Host "Starting GUI..." -ForegroundColor Green
+            & $pythonExe -m app.gui
+            $script:ExitCode = $LASTEXITCODE
+            # GUI exited - pause so user can read any error output
+            Invoke-PauseExit -OnError
+        }
+        "2" {
+            Write-Host ""
+            Write-Host "Starting API server..." -ForegroundColor Green
+            Write-Host "  Swagger docs: http://localhost:8000/docs"
+            Write-Host "  Press Ctrl+C to stop."
+            Write-Host ""
+            & $pythonExe -m app.api
+            $script:ExitCode = $LASTEXITCODE
+            Invoke-PauseExit -OnError
+        }
+        "3" {
+            Write-Host ""
+            Write-Host "Starting API server in a new window..." -ForegroundColor Green
+            $apiArgs = "-NoExit -ExecutionPolicy Bypass -Command `"Set-Location '$ScriptDir'; & '$pythonExe' -m app.api`""
+            Start-Process powershell.exe -ArgumentList $apiArgs
+
+            Write-Host "Starting GUI..." -ForegroundColor Green
+            & $pythonExe -m app.gui
+            $script:ExitCode = $LASTEXITCODE
+            Invoke-PauseExit -OnError
+        }
+        default {
+            throw "Invalid option '$choice'. Please enter 1, 2, or 3."
+        }
     }
-    "3" {
-        Write-Host "`n同時啟動 GUI 和 API 伺服器 …" -ForegroundColor Green
-        Start-Process -FilePath $pythonExe -ArgumentList "-m app.api" -WindowStyle Normal
-        & $pythonExe -m app.gui
-    }
-    default {
-        Write-Host "✘ 無效選項，退出。" -ForegroundColor Red
-        exit 1
-    }
+
+} catch {
+    Write-Host ""
+    Write-Host "[ERROR] $_" -ForegroundColor Red
+    $script:ExitCode = 1
+    Write-Host ""
+    Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
+    $null = Read-Host
+    exit $script:ExitCode
 }

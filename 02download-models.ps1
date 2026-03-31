@@ -1,64 +1,86 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Voice2Text — 02 下載 / 驗證模型
+    Voice2Text - 02 Download / Verify Models
 .DESCRIPTION
-  從 Hugging Face Hub 下載 Qwen3-ASR 模型到本機快取
+    Downloads Qwen3-ASR speech recognition models from Hugging Face Hub
+    into the local cache. Requires 01setup.ps1 to have been run first.
+.EXAMPLE
+    .\02download-models.ps1
 #>
 
-$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$script:ExitCode = 0
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $ScriptDir
 
-$pythonExe = ".venv\Scripts\python.exe"
-if (-Not (Test-Path $pythonExe)) {
-    Write-Host "✘ 找不到虛擬環境，請先執行 01setup.ps1" -ForegroundColor Red
-    exit 1
+function Invoke-PauseExit {
+    Write-Host ""
+    Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
+    $null = Read-Host
+    exit $script:ExitCode
 }
 
-Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host " Voice2Text  02 — 下載模型" -ForegroundColor Cyan
-Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "可用模型：" -ForegroundColor Yellow
-Write-Host "  1) Qwen/Qwen3-ASR-0.6B  （推薦，~1.3 GB）"
-Write-Host "  2) Qwen/Qwen3-ASR-1.7B  （較精確，~3.5 GB）"
-Write-Host "  3) 全部下載"
-Write-Host ""
+try {
 
-$choice = Read-Host "請選擇要下載的模型 [1/2/3]"
-
-$models = @()
-switch ($choice) {
-    "1" { $models = @("Qwen/Qwen3-ASR-0.6B") }
-    "2" { $models = @("Qwen/Qwen3-ASR-1.7B") }
-    "3" { $models = @("Qwen/Qwen3-ASR-0.6B", "Qwen/Qwen3-ASR-1.7B") }
-    default {
-        Write-Host "✘ 無效選項，退出。" -ForegroundColor Red
-        exit 1
+    # ── Verify virtual environment exists ─────────────────────────
+    $pythonExe = Join-Path $ScriptDir ".venv\Scripts\python.exe"
+    if (-Not (Test-Path $pythonExe)) {
+        throw "Virtual environment not found. Please run 01setup.ps1 first."
     }
-}
 
-foreach ($model in $models) {
-    Write-Host "`n下載 $model …" -ForegroundColor Yellow
-    & $pythonExe -c @"
-from huggingface_hub import snapshot_download
+    Write-Host "===================================" -ForegroundColor Cyan
+    Write-Host " Voice2Text  02 - Download Models" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Available models:" -ForegroundColor Yellow
+    Write-Host "  1) Qwen/Qwen3-ASR-0.6B  (recommended, ~1.3 GB, faster)"
+    Write-Host "  2) Qwen/Qwen3-ASR-1.7B  (higher accuracy, ~3.5 GB)"
+    Write-Host "  3) Download both"
+    Write-Host ""
+
+    $choice = Read-Host "Select model to download [1/2/3]"
+    $choice  = $choice.Trim()
+
+    $models = switch ($choice) {
+        "1"     { @("Qwen/Qwen3-ASR-0.6B") }
+        "2"     { @("Qwen/Qwen3-ASR-1.7B") }
+        "3"     { @("Qwen/Qwen3-ASR-0.6B", "Qwen/Qwen3-ASR-1.7B") }
+        default { throw "Invalid selection '$choice'. Please enter 1, 2, or 3." }
+    }
+
+    foreach ($model in $models) {
+        Write-Host ""
+        Write-Host "--- Downloading $model ---" -ForegroundColor Yellow
+        Write-Host "    (large file; progress is shown below)"
+
+        $pyCode = @"
 import sys
+from huggingface_hub import snapshot_download
 try:
     path = snapshot_download(repo_id='$model')
-    print(f'✔ 下載完成：{path}')
-except Exception as e:
-    print(f'✘ 下載失敗：{e}', file=sys.stderr)
+    print(f'Download complete: {path}')
+except Exception as exc:
+    print(f'Download failed: {exc}', file=sys.stderr)
     sys.exit(1)
 "@
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "✘ 下載 $model 失敗，請確認網路連線和 Hugging Face 存取權限。" -ForegroundColor Red
-        exit 1
+        & $pythonExe -c $pyCode
+        if ($LASTEXITCODE -ne 0) {
+            throw "Failed to download $model. Check network connection and Hugging Face access."
+        }
+        Write-Host "  [OK] $model downloaded successfully." -ForegroundColor Green
     }
+
+    Write-Host ""
+    Write-Host "===================================" -ForegroundColor Green
+    Write-Host " Model download complete!" -ForegroundColor Green
+    Write-Host " Next step: run 03start.ps1" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Green
+
+} catch {
+    Write-Host ""
+    Write-Host "[ERROR] $_" -ForegroundColor Red
+    $script:ExitCode = 1
 }
 
-Write-Host ""
-Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host " 模型下載完成！" -ForegroundColor Green
-Write-Host " 下一步：執行 03start.ps1 啟動應用程式" -ForegroundColor Cyan
-Write-Host "=====================================" -ForegroundColor Cyan
+Invoke-PauseExit

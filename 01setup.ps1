@@ -1,99 +1,151 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Voice2Text — 01 初始化環境
+    Voice2Text - 01 Environment Setup
 .DESCRIPTION
-  建立虛擬環境、安裝依賴套件、建立資料目錄、產生預設 .env
+    Creates virtual environment, installs dependencies, creates data directories,
+    and generates a default .env configuration file.
+    Run this script once before using the application.
+.EXAMPLE
+    .\01setup.ps1
 #>
 
-$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+$script:ExitCode = 0
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
-
-Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host " Voice2Text  01 — 初始化環境" -ForegroundColor Cyan
-Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host ""
-
-# 進入專案目錄
 Set-Location $ScriptDir
 
-# ── Python 版本檢查 ────────────────────────────────────────────────────
-$python = "python"
+# ------------------------------------------------------------------
+# Helper: always pause before closing so the window stays readable
+# ------------------------------------------------------------------
+function Invoke-PauseExit {
+    Write-Host ""
+    Write-Host "Press Enter to exit..." -ForegroundColor DarkGray
+    $null = Read-Host
+    exit $script:ExitCode
+}
+
+# ------------------------------------------------------------------
+# Helper: print a section header
+# ------------------------------------------------------------------
+function Write-Step([string]$msg) {
+    Write-Host ""
+    Write-Host ">>> $msg" -ForegroundColor Yellow
+}
+
+# ------------------------------------------------------------------
+# Main logic wrapped in try/catch so exceptions stay visible
+# ------------------------------------------------------------------
 try {
-    $ver = & $python --version 2>&1
-    Write-Host "✔ 找到 Python：$ver" -ForegroundColor Green
-} catch {
-    Write-Host "✘ 找不到 python，請先安裝 Python 3.10+。" -ForegroundColor Red
-    exit 1
-}
 
-# ── 建立虛擬環境 ──────────────────────────────────────────────────────
-if (-Not (Test-Path ".venv")) {
-    Write-Host "`n建立虛擬環境 .venv …" -ForegroundColor Yellow
-    & $python -m venv .venv
-    Write-Host "✔ 虛擬環境建立完成" -ForegroundColor Green
-} else {
-    Write-Host "✔ 虛擬環境已存在，跳過" -ForegroundColor Green
-}
+    Write-Host "===================================" -ForegroundColor Cyan
+    Write-Host " Voice2Text  01 - Environment Setup" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Cyan
 
-# ── 啟動虛擬環境並安裝套件 ────────────────────────────────────────────
-$pip = ".venv\Scripts\pip.exe"
-$pythonExe = ".venv\Scripts\python.exe"
-
-Write-Host "`n升級 pip …" -ForegroundColor Yellow
-& $pythonExe -m pip install --upgrade pip --quiet
-
-Write-Host "`n安裝依賴套件（pyproject.toml）…" -ForegroundColor Yellow
-& $pip install -e ".[all]" --quiet
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "✘ 安裝失敗，請檢查 pyproject.toml 或網路連線。" -ForegroundColor Red
-    exit 1
-}
-Write-Host "✔ 套件安裝完成" -ForegroundColor Green
-
-# ── 建立資料目錄 ─────────────────────────────────────────────────────
-$dirs = @("data", "data\recordings")
-foreach ($d in $dirs) {
-    if (-Not (Test-Path $d)) {
-        New-Item -ItemType Directory -Path $d | Out-Null
-        Write-Host "✔ 建立目錄 $d" -ForegroundColor Green
+    # ── Python version check ──────────────────────────────────────
+    Write-Step "Checking Python installation..."
+    $pyCmd = $null
+    foreach ($candidate in @("python", "python3", "py")) {
+        try {
+            $ver = & $candidate --version 2>&1
+            if ($ver -match "Python 3\.(\d+)" -and [int]$Matches[1] -ge 10) {
+                $pyCmd = $candidate
+                Write-Host "  [OK] Found $ver" -ForegroundColor Green
+                break
+            }
+        } catch { }
     }
-}
+    if (-not $pyCmd) {
+        throw "Python 3.10 or newer not found. Please install from https://python.org and re-run."
+    }
 
-# ── 產生預設 .env ────────────────────────────────────────────────────
-if (-Not (Test-Path ".env")) {
-    Write-Host "`n建立預設 .env …" -ForegroundColor Yellow
-    @"
-# Voice2Text 設定檔 — 依需求修改
+    # ── Create virtual environment ────────────────────────────────
+    Write-Step "Setting up virtual environment..."
+    if (-Not (Test-Path ".venv")) {
+        Write-Host "  Creating .venv ..."
+        & $pyCmd -m venv .venv
+        if ($LASTEXITCODE -ne 0) { throw "Failed to create virtual environment." }
+        Write-Host "  [OK] Virtual environment created." -ForegroundColor Green
+    } else {
+        Write-Host "  [SKIP] .venv already exists." -ForegroundColor DarkGray
+    }
 
+    $pipExe    = Join-Path $ScriptDir ".venv\Scripts\pip.exe"
+    $pythonExe = Join-Path $ScriptDir ".venv\Scripts\python.exe"
+
+    # ── Upgrade pip ───────────────────────────────────────────────
+    Write-Step "Upgrading pip..."
+    & $pythonExe -m pip install --upgrade pip --quiet
+    if ($LASTEXITCODE -ne 0) { throw "pip upgrade failed." }
+    Write-Host "  [OK] pip upgraded." -ForegroundColor Green
+
+    # ── Install project dependencies ──────────────────────────────
+    Write-Step "Installing project dependencies (pyproject.toml)..."
+    Write-Host "  This may take several minutes on first run."
+    & $pipExe install -e ".[all]"
+    if ($LASTEXITCODE -ne 0) { throw "Package installation failed. Check pyproject.toml and network connection." }
+    Write-Host "  [OK] Dependencies installed." -ForegroundColor Green
+
+    # ── Create data directories ───────────────────────────────────
+    Write-Step "Creating data directories..."
+    foreach ($dir in @("data", "data\recordings")) {
+        $full = Join-Path $ScriptDir $dir
+        if (-Not (Test-Path $full)) {
+            New-Item -ItemType Directory -Path $full | Out-Null
+            Write-Host "  [OK] Created $dir" -ForegroundColor Green
+        } else {
+            Write-Host "  [SKIP] $dir already exists." -ForegroundColor DarkGray
+        }
+    }
+
+    # ── Generate default .env ─────────────────────────────────────
+    Write-Step "Generating .env configuration..."
+    $envPath = Join-Path $ScriptDir ".env"
+    if (-Not (Test-Path $envPath)) {
+        $envContent = @"
+# Voice2Text Configuration - Edit as needed
+
+# ASR Model
 DEFAULT_MODEL=Qwen/Qwen3-ASR-0.6B
 DEVICE=cuda
 DTYPE=float16
 
+# Audio
 SAMPLE_RATE=16000
 CHANNELS=1
 VAD_ENABLED=true
 
-# 翻譯 API（Ollama 預設）
+# Translation API (Ollama default)
 TRANSLATION_API_URL=http://localhost:11434/v1/chat/completions
 TRANSLATION_API_KEY=
 TRANSLATION_MODEL=llama3.2
 
+# Storage
 DATA_DIR=./data
 RECORDINGS_DIR=./data/recordings
 DATABASE_URL=sqlite+aiosqlite:///./data/voice2text.db
 MAX_HISTORY_ITEMS=1000
 
+# OpenCC
 OPENCC_MODE=s2t
 HOTWORDS_FILE=./data/hotwords.json
-"@ | Set-Content ".env" -Encoding UTF8
-    Write-Host "✔ 已建立 .env（請依需求修改）" -ForegroundColor Green
-} else {
-    Write-Host "✔ .env 已存在，跳過" -ForegroundColor Green
+"@
+        $envContent | Set-Content $envPath -Encoding UTF8
+        Write-Host "  [OK] Created .env (edit it to customize settings)" -ForegroundColor Green
+    } else {
+        Write-Host "  [SKIP] .env already exists." -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    Write-Host "===================================" -ForegroundColor Green
+    Write-Host " Setup complete!" -ForegroundColor Green
+    Write-Host " Next step: run 02download-models.ps1" -ForegroundColor Cyan
+    Write-Host "===================================" -ForegroundColor Green
+
+} catch {
+    Write-Host ""
+    Write-Host "[ERROR] $_" -ForegroundColor Red
+    $script:ExitCode = 1
 }
 
-Write-Host ""
-Write-Host "=====================================" -ForegroundColor Cyan
-Write-Host " 初始化完成！" -ForegroundColor Green
-Write-Host " 下一步：執行 02download-models.ps1" -ForegroundColor Cyan
-Write-Host "=====================================" -ForegroundColor Cyan
+Invoke-PauseExit
