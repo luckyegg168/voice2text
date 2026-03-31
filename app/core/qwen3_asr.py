@@ -7,49 +7,71 @@ import numpy as np
 
 from app.core.config import get_settings
 
-# 延遲匯入 torch / qwen_asr，讓 GUI 在未安裝模型時仍能啟動
-try:
-    import torch
-    _TORCH_AVAILABLE = True
-except ImportError:
-    _TORCH_AVAILABLE = False
-    torch = None  # type: ignore[assignment]
+# ── Truly-lazy imports ───────────────────────────────────────────────────────
+# torch / qwen_asr are imported only when first needed so that a bare
+# ``import app.core.qwen3_asr`` never loads heavy C extensions into the
+# process.  This prevents PySide6/shiboken's update_mapping() from
+# encountering partially-initialised pandas/sklearn during GUI startup,
+# which causes the fatal "_pandas_datetime_CAPI" crash.
 
-try:
-    from qwen_asr import Qwen3ASRModel
-    _QWEN_ASR_AVAILABLE = True
-except ImportError:
-    _QWEN_ASR_AVAILABLE = False
-    Qwen3ASRModel = None  # type: ignore[assignment,misc]
+_torch_mod = None   # cached: torch module, or False if unavailable
+_qwen_cls  = None   # cached: Qwen3ASRModel class, or False if unavailable
+
+
+def _torch():
+    """Return the torch module, or None when not installed."""
+    global _torch_mod
+    if _torch_mod is None:
+        try:
+            import torch as _t  # noqa: PLC0415
+            _torch_mod = _t
+        except ImportError:
+            _torch_mod = False
+    return _torch_mod if _torch_mod is not False else None
+
+
+def _qwen3_cls():
+    """Return Qwen3ASRModel class, or None when not installed."""
+    global _qwen_cls
+    if _qwen_cls is None:
+        try:
+            from qwen_asr import Qwen3ASRModel as _cls  # noqa: PLC0415
+            _qwen_cls = _cls
+        except ImportError:
+            _qwen_cls = False
+    return _qwen_cls if _qwen_cls is not False else None
+
 
 _settings = get_settings()
 
-_model_cache: Optional["Qwen3ASRModel"] = None  # type: ignore[type-arg]
+_model_cache: Optional[object] = None
 _current_model_id: Optional[str] = None
 
 
 def is_available() -> bool:
     """回傳 torch 和 qwen-asr 是否均已安裝"""
-    return _TORCH_AVAILABLE and _QWEN_ASR_AVAILABLE
+    return _torch() is not None and _qwen3_cls() is not None
 
 
 def _get_dtype():
     """取得 torch dtype"""
-    if not _TORCH_AVAILABLE:
+    t = _torch()
+    if t is None:
         return None
     dtype_map = {
-        "float16": torch.float16,
-        "bfloat16": torch.bfloat16,
-        "float32": torch.float32,
+        "float16": t.float16,
+        "bfloat16": t.bfloat16,
+        "float32": t.float32,
     }
-    return dtype_map.get(_settings.dtype, torch.float16)
+    return dtype_map.get(_settings.dtype, t.float16)
 
 
 def _get_device() -> str:
     """取得設備"""
-    if not _TORCH_AVAILABLE:
+    t = _torch()
+    if t is None:
         return "cpu"
-    if _settings.device == "cuda" and torch.cuda.is_available():
+    if _settings.device == "cuda" and t.cuda.is_available():
         return "cuda:0"
     return "cpu"
 
@@ -66,11 +88,13 @@ def load_model(model_id: str = "Qwen/Qwen3-ASR-0.6B"):
     Raises:
         RuntimeError: 若 torch / qwen-asr 未安裝
     """
-    if not _TORCH_AVAILABLE:
+    t = _torch()
+    if t is None:
         raise RuntimeError(
             "torch 未安裝。請執行：01setup.ps1 重新安裝依賴，或手動：pip install torch"
         )
-    if not _QWEN_ASR_AVAILABLE:
+    Qwen3ASRModel = _qwen3_cls()
+    if Qwen3ASRModel is None:
         raise RuntimeError(
             "qwen-asr 未安裝。請執行：01setup.ps1 重新安裝依賴，或手動：pip install qwen-asr"
         )
@@ -83,8 +107,8 @@ def load_model(model_id: str = "Qwen/Qwen3-ASR-0.6B"):
     if _model_cache is not None:
         del _model_cache
         gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        if t.cuda.is_available():
+            t.cuda.empty_cache()
 
     _model_cache = Qwen3ASRModel.from_pretrained(
         model_id,
@@ -106,8 +130,9 @@ def unload_model() -> None:
         _model_cache = None
         _current_model_id = None
         gc.collect()
-        if _TORCH_AVAILABLE and torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        t = _torch()
+        if t is not None and t.cuda.is_available():
+            t.cuda.empty_cache()
 
 
 def is_model_loaded() -> bool:

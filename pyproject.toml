@@ -43,6 +43,9 @@ dev = [
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
 ]
+all = [
+    "voice2text[dev]",
+]
 
 [project.scripts]
 voice2text = "app.cli.main:app"

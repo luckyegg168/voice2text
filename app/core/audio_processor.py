@@ -6,8 +6,11 @@ from typing import Callable, Optional
 
 import numpy as np
 import sounddevice as sd
-from scipy.io import wavfile
-from scipy.signal import resample_poly
+
+# scipy is imported lazily inside each method that needs it.
+# Importing scipy at module level would load heavy C extensions
+# (scipy, sklearn, pandas) before PySide6 is initialised, triggering
+# shiboken's update_mapping() circular-import crash.
 
 
 class AudioProcessor:
@@ -144,6 +147,7 @@ class AudioProcessor:
         Returns:
             (音訊資料, 取樣率)
         """
+        from scipy.io import wavfile  # lazy – avoids early C-ext loading
         sr, data = wavfile.read(file_path)
         if data.dtype != np.float32:
             data = data.astype(np.float32) / 32768.0
@@ -158,6 +162,7 @@ class AudioProcessor:
             audio_data: 音訊資料
             sample_rate: 取樣率
         """
+        from scipy.io import wavfile  # lazy
         wavfile.write(file_path, sample_rate, (audio_data * 32768).astype(np.int16))
 
     @staticmethod
@@ -177,6 +182,7 @@ class AudioProcessor:
             audio_data = audio_data[:, 0]
 
         if source_sr != target_sr:
+            from scipy.signal import resample_poly  # lazy
             gcd = np.gcd(target_sr, source_sr)
             audio_data = resample_poly(audio_data, target_sr // gcd, source_sr // gcd)
 
@@ -194,6 +200,7 @@ class AudioProcessor:
             音訊資料
         """
         audio_io = io.BytesIO(audio_bytes)
+        from scipy.io import wavfile  # lazy
         sr, data = wavfile.read(audio_io)
         if data.dtype != np.float32:
             data = data.astype(np.float32) / 32768.0
@@ -213,6 +220,7 @@ class AudioProcessor:
             WAV 位元組
         """
         buffer = io.BytesIO()
+        from scipy.io import wavfile  # lazy
         wavfile.write(buffer, sample_rate, (audio_data * 32768).astype(np.int16))
         buffer.seek(0)
         return buffer.read()
