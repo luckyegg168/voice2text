@@ -45,13 +45,15 @@ Write-Host "[3/5] 升級 pip..." -NoNewline
 Write-Host " OK" -ForegroundColor Green
 
 # 安裝依賴
-Write-Host "[4/5] 安裝依賴套件..." -NoNewline
-$pipArgs = @("install", "-e", ".[dev]", "--quiet")
-& .\.venv\Scripts\python.exe -m pip @pipArgs 2>&1 | Out-Null
+Write-Host "[4/5] 安裝依賴套件..."
+$pipOutput = & .\.venv\Scripts\python.exe -m pip install -e ".[dev]" 2>&1
 if ($LASTEXITCODE -eq 0) {
-    Write-Host " OK" -ForegroundColor Green
+    Write-Host "  OK" -ForegroundColor Green
 } else {
-    Write-Host " ERROR" -ForegroundColor Red
+    Write-Host "  ERROR: pip install 失敗" -ForegroundColor Red
+    $pipOutput | Where-Object { $_ -match 'ERROR|error|Error' } | ForEach-Object {
+        Write-Host "  $_" -ForegroundColor Red
+    }
     exit 1
 }
 

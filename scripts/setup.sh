@@ -43,7 +43,13 @@ pip install --upgrade pip --quiet
 
 # 安裝依賴
 echo "[4/5] 安裝依賴套件..."
-pip install -e ".[dev]" --quiet
+if pip install -e ".[dev]" 2>&1 | tee /tmp/pip_install.log; then
+    echo "  OK"
+else
+    echo "  ERROR: pip install 失敗" >&2
+    grep -i 'error' /tmp/pip_install.log >&2 || true
+    exit 1
+fi
 
 # 建立必要目錄
 echo "[5/5] 建立資料目錄..."
